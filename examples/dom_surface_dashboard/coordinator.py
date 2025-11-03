@@ -322,13 +322,13 @@ class DomSurfaceCoordinator:
                     volume = 0.0
                 action = _normalise_depth_action(entry.get("type") or entry.get("Type") or entry.get("t"))
 
-                rounded_price = round(price)
+                price_key = round(price, 6)
                 side_book = book[side]
 
                 if action == "delete" or volume <= 0:
-                    side_book.pop(rounded_price, None)
+                    side_book.pop(price_key, None)
                 else:
-                    side_book[rounded_price] = volume
+                    side_book[price_key] = volume
 
         self._broadcast_snapshot(force=True)
 
@@ -381,17 +381,8 @@ class DomSurfaceCoordinator:
             for trade in list(self._volume_trades)
         ]
 
-        bids_sorted = sorted(self._order_book["bid"].items(), key=lambda kv: kv[0], reverse=True)
-        asks_sorted = sorted(self._order_book["ask"].items(), key=lambda kv: kv[0])
-
-        bids_payload = [
-            {"price": price, "volume": volume, "level": idx + 1}
-            for idx, (price, volume) in enumerate(bids_sorted[: self.depth_levels])
-        ]
-        asks_payload = [
-            {"price": price, "volume": volume, "level": idx + 1}
-            for idx, (price, volume) in enumerate(asks_sorted[: self.depth_levels])
-        ]
+        bids_payload = self._aggregate_order_book_side(self._order_book["bid"], descending=True)
+        asks_payload = self._aggregate_order_book_side(self._order_book["ask"], descending=False)
 
         snapshot = {
             "contract_id": self.contract_id,
@@ -413,4 +404,27 @@ class DomSurfaceCoordinator:
     def latest_snapshot(self) -> Optional[Dict[str, Any]]:
         with self._lock:
             return self._latest_snapshot
+
+    def _aggregate_order_book_side(
+        self,
+        side_book: Dict[float, float],
+        *,
+        descending: bool,
+    ) -> List[Dict[str, Any]]:
+        buckets: Dict[int, float] = {}
+        for raw_price, volume in side_book.items():
+            if volume is None or volume <= 0:
+                continue
+            price_bucket = int(round(raw_price))
+            buckets[price_bucket] = buckets.get(price_bucket, 0.0) + float(volume)
+
+        ordered = sorted(buckets.items(), key=lambda kv: kv[0], reverse=descending)
+        payload: List[Dict[str, Any]] = []
+        for idx, (price, total_volume) in enumerate(ordered[: self.depth_levels]):
+            payload.append({
+                "price": price,
+                "volume": total_volume,
+                "level": idx + 1,
+            })
+        return payload
 
