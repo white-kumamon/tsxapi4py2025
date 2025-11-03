@@ -308,6 +308,9 @@ class DomSurfaceCoordinator:
         with self._lock:
             book = self._order_book
             for entry in updates:
+                if not isinstance(entry, dict):
+                    continue
+
                 price = _to_float(entry.get("price") or entry.get("Price") or entry.get("p"))
                 if price is None:
                     continue
