@@ -15,7 +15,9 @@ import uuid
 
 logger = logging.getLogger(__name__)
 
-logger.critical("!!! LOADING DataStream class definition from data_stream.py - VERSION CHECK: HAS START METHOD !!!")
+# Keep the import-time log lightweight so consumers do not see an unexpected
+# critical message simply for importing the module.
+logger.debug("Loading DataStream class definition (start method available).")
 
 # Callback type aliases
 # The DataStream user will provide callbacks that expect the actual data payload (e.g., Dict for quote)
@@ -44,7 +46,7 @@ class DataStream:
         on_state_change_callback: Optional[StreamStateChangeCallback] = None,
         auto_subscribe_quotes: bool = False,
         auto_subscribe_trades: bool = False,
-        auto_subscribe_depth: bool = True # Defaulting to False as it can be verbose
+        auto_subscribe_depth: bool = True # Depth defaults to True to power DOM/heatmaps
     ):
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}[{contract_id_to_subscribe}]") # Instance specific logger
         
