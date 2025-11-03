@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <title>TSX DOM Surface Dashboard</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0f172a;
+        --bg-elevated: #111c34;
+        --text: #e2e8f0;
+        --accent: #38bdf8;
+        --warning: #f97316;
+        --error: #f87171;
+        --success: #34d399;
+        font-family: 'Segoe UI', 'Helvetica Neue', 'Hiragino Sans', 'Noto Sans JP', sans-serif;
+      }
+
+      body {
+        margin: 0;
+        padding: 0;
+        background: var(--bg);
+        color: var(--text);
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+
+      header {
+        padding: 1.2rem 1.8rem;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 1rem;
+        background: rgba(15, 23, 42, 0.9);
+        border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+        backdrop-filter: blur(12px);
+      }
+
+      header h1 {
+        margin: 0;
+        font-size: 1.4rem;
+        font-weight: 600;
+        letter-spacing: 0.05em;
+      }
+
+      .status-chip {
+        padding: 0.3rem 0.8rem;
+        border-radius: 999px;
+        font-size: 0.85rem;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        background: rgba(59, 130, 246, 0.2);
+        border: 1px solid rgba(59, 130, 246, 0.4);
+      }
+
+      .status-chip[data-state="CONNECTED"] {
+        background: rgba(52, 211, 153, 0.2);
+        border-color: rgba(52, 211, 153, 0.4);
+      }
+
+      .status-chip[data-state="ERROR"],
+      .status-chip[data-state="ERROR"] {
+        background: rgba(248, 113, 113, 0.25);
+        border-color: rgba(248, 113, 113, 0.4);
+      }
+
+      main {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 1.5rem;
+        padding: 1.5rem;
+      }
+
+      .overview-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1.8fr) minmax(0, 1fr);
+        gap: 1.5rem;
+      }
+
+      .panel {
+        background: var(--bg-elevated);
+        border-radius: 1rem;
+        padding: 1.2rem 1.4rem 1.4rem;
+        box-shadow: 0 12px 24px rgba(15, 23, 42, 0.35);
+        border: 1px solid rgba(148, 163, 184, 0.08);
+        display: flex;
+        flex-direction: column;
+        gap: 1.2rem;
+        min-height: 0;
+      }
+
+      .panel h2 {
+        margin: 0;
+        font-size: 1rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        opacity: 0.8;
+      }
+
+      .chart-container {
+        flex: 1;
+        min-height: 240px;
+      }
+
+      .chart-container.tall {
+        min-height: 420px;
+      }
+
+      .chart-container.medium {
+        min-height: 320px;
+      }
+
+      #price-chart {
+        width: 100%;
+        height: 100%;
+      }
+
+      #dom-surface {
+        width: 100%;
+        height: 320px;
+      }
+
+      .status-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: 0.8rem;
+      }
+
+      .status-card {
+        background: rgba(148, 163, 184, 0.08);
+        border-radius: 0.75rem;
+        padding: 0.85rem 1rem;
+        border: 1px solid rgba(148, 163, 184, 0.12);
+      }
+
+      .status-card dt {
+        font-size: 0.75rem;
+        opacity: 0.7;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        margin-bottom: 0.35rem;
+      }
+
+      .status-card dd {
+        margin: 0;
+        font-size: 1.1rem;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+      }
+
+      .depth-lists {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 1rem;
+      }
+
+      .depth-list h3 {
+        margin: 0 0 0.6rem;
+        font-size: 0.9rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        opacity: 0.8;
+      }
+
+      .depth-list ul {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: grid;
+        gap: 0.4rem;
+      }
+
+      .depth-list li {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.6rem;
+        padding: 0.45rem 0.6rem;
+        border-radius: 0.6rem;
+        background: rgba(15, 23, 42, 0.45);
+        border: 1px solid rgba(148, 163, 184, 0.08);
+        font-size: 0.9rem;
+      }
+
+      .depth-list li.heavy {
+        background: rgba(226, 232, 240, 0.12);
+        border-color: rgba(255, 255, 255, 0.35);
+        color: #ffffff;
+      }
+
+      .depth-list li span.price {
+        font-variant-numeric: tabular-nums;
+      }
+
+      .depth-list li span.volume {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+
+      footer {
+        padding: 0.9rem 1.5rem;
+        font-size: 0.75rem;
+        opacity: 0.6;
+        letter-spacing: 0.08em;
+      }
+
+      @media (max-width: 1100px) {
+        .overview-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>TSX DOM Surface Dashboard</h1>
+      <div class="status-chip" id="connection-state" data-state="INIT">INIT</div>
+    </header>
+    <main>
+      <div class="overview-grid">
+        <section class="panel price-panel">
+          <h2>Price &amp; Volume</h2>
+          <div class="chart-container tall">
+            <div id="price-chart"></div>
+          </div>
+          <dl class="status-grid">
+            <div class="status-card">
+              <dt>Contract</dt>
+              <dd id="status-contract">—</dd>
+            </div>
+            <div class="status-card">
+              <dt>Last Trade</dt>
+              <dd id="status-last-price">—</dd>
+            </div>
+            <div class="status-card">
+              <dt>Bid / Ask</dt>
+              <dd id="status-bid-ask">—</dd>
+            </div>
+            <div class="status-card">
+              <dt>Updated</dt>
+              <dd id="status-updated">—</dd>
+            </div>
+          </dl>
+        </section>
+        <section class="panel dom-panel">
+          <h2>DOM Surface &amp; Order Book</h2>
+          <div class="chart-container medium">
+            <div id="dom-surface"></div>
+          </div>
+          <div class="depth-lists">
+            <div class="depth-list">
+              <h3>Bids</h3>
+              <ul id="depth-bids"></ul>
+            </div>
+            <div class="depth-list">
+              <h3>Asks</h3>
+              <ul id="depth-asks"></ul>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+    <footer>
+      SignalR stream is proxied via FastAPI. Refresh the browser if connection is lost for a prolonged period.
+    </footer>
+
+    <script>
+      const priceChart = document.getElementById('price-chart');
+      const domSurface = document.getElementById('dom-surface');
+      const connectionChip = document.getElementById('connection-state');
+      const contractEl = document.getElementById('status-contract');
+      const lastPriceEl = document.getElementById('status-last-price');
+      const bidAskEl = document.getElementById('status-bid-ask');
+      const updatedEl = document.getElementById('status-updated');
+      const depthBidsEl = document.getElementById('depth-bids');
+      const depthAsksEl = document.getElementById('depth-asks');
+
+      const HEAVY_VOLUME_THRESHOLD = 10;
+      const DOM_VOLUME_COLORSCALE = [
+        [0, '#0f172a'],
+        [0.25, '#1d4ed8'],
+        [0.5, '#38bdf8'],
+        [0.75, '#fbbf24'],
+        [1, '#ffffff'],
+      ];
+
+      let priceInitialised = false;
+      let domInitialised = false;
+      let ws;
+      let retryCount = 0;
+
+      function initCharts() {
+        if (!priceInitialised) {
+          Plotly.newPlot(
+            priceChart,
+            [
+              {
+                type: 'candlestick',
+                name: 'Price',
+                x: [],
+                open: [],
+                high: [],
+                low: [],
+                close: [],
+                increasing: {
+                  line: { color: '#34d399', width: 2 },
+                  fillcolor: 'rgba(52, 211, 153, 0.25)',
+                },
+                decreasing: {
+                  line: { color: '#f87171', width: 2 },
+                  fillcolor: 'rgba(248, 113, 113, 0.25)',
+                },
+                hovertemplate:
+                  '時間: %{x|%H:%M}<br>始値: %{open:.2f}<br>高値: %{high:.2f}<br>安値: %{low:.2f}<br>終値: %{close:.2f}<extra></extra>',
+                xperiod: 180000,
+              },
+              {
+                type: 'bar',
+                name: 'Volume',
+                x: [],
+                y: [],
+                yaxis: 'y2',
+                marker: {
+                  color: '#1d4ed8',
+                  opacity: 0.65,
+                },
+                hovertemplate: '時間: %{x|%H:%M}<br>出来高: %{y:.2f}<extra></extra>',
+              },
+              {
+                name: 'Trade Volume',
+                mode: 'markers',
+                x: [],
+                y: [],
+                text: [],
+                marker: {
+                  color: '#fbbf24',
+                  sizemode: 'area',
+                  sizeref: 1,
+                  sizemin: 6,
+                  opacity: 0.85,
+                  line: { color: 'rgba(15, 23, 42, 0.6)', width: 1 },
+                },
+                hovertemplate: '時間: %{x|%H:%M:%S}<br>価格: %{y:.2f}<br>出来高: %{text}<extra></extra>',
+              },
+            ],
+            {
+              paper_bgcolor: 'rgba(0,0,0,0)',
+              plot_bgcolor: 'rgba(17,28,52,0.7)',
+              margin: { t: 30, l: 60, r: 16, b: 40 },
+              xaxis: {
+                title: 'Time',
+                type: 'date',
+                gridcolor: 'rgba(148,163,184,0.15)',
+                rangeslider: { visible: false },
+              },
+              yaxis: {
+                title: 'Price',
+                gridcolor: 'rgba(148,163,184,0.15)',
+                domain: [0.38, 1],
+              },
+              yaxis2: {
+                title: 'Volume',
+                gridcolor: 'rgba(148,163,184,0.15)',
+                domain: [0, 0.3],
+                showticklabels: true,
+                fixedrange: true,
+              },
+              legend: { orientation: 'h', xanchor: 'center', x: 0.5, y: 1.18 },
+              hovermode: 'x unified',
+            },
+            { responsive: true, displaylogo: false }
+          );
+          priceInitialised = true;
+        }
+
+        if (!domInitialised) {
+          Plotly.newPlot(
+            domSurface,
+            [
+              {
+                type: 'heatmap',
+                z: [[], []],
+                x: [],
+                y: ['Bids', 'Asks'],
+                colorscale: DOM_VOLUME_COLORSCALE,
+                showscale: true,
+                zmin: 0,
+                zmax: HEAVY_VOLUME_THRESHOLD,
+                hovertemplate: '価格: %{x}<br>出来高: %{z}<extra></extra>',
+                colorbar: {
+                  title: 'Volume',
+                  tickcolor: '#e2e8f0',
+                  titlefont: { color: '#e2e8f0' },
+                  tickfont: { color: '#e2e8f0' },
+                },
+              },
+            ],
+            {
+              paper_bgcolor: 'rgba(0,0,0,0)',
+              plot_bgcolor: 'rgba(17,28,52,0.7)',
+              margin: { t: 30, l: 60, r: 10, b: 40 },
+              xaxis: { title: 'Price', gridcolor: 'rgba(148,163,184,0.15)' },
+              yaxis: { title: '', gridcolor: 'rgba(148,163,184,0.15)' },
+            },
+            { responsive: true, displaylogo: false }
+          );
+          domInitialised = true;
+        }
+      }
+
+      function updateConnectionState(stateText) {
+        connectionChip.textContent = stateText;
+        connectionChip.dataset.state = stateText;
+      }
+
+      function updatePriceChart(payload) {
+        const candles = payload.candles ?? [];
+        const bubbles = payload.volume_bubbles ?? [];
+
+        const candleTimes = candles.map((candle) => new Date(candle.start));
+        const opens = candles.map((candle) => candle.open ?? null);
+        const highs = candles.map((candle) => candle.high ?? null);
+        const lows = candles.map((candle) => candle.low ?? null);
+        const closes = candles.map((candle) => candle.close ?? null);
+        const volumes = candles.map((candle) => Math.max(candle.volume ?? 0, 0));
+
+        const bubbleX = bubbles.map((trade) => new Date(trade.timestamp));
+        const bubbleY = bubbles.map((trade) => trade.price);
+        const rawBubbleVolumes = bubbles.map((trade) => Math.max(trade.volume ?? 0, 0));
+        const bubbleSizes = rawBubbleVolumes.map((volume) => {
+          if (!Number.isFinite(volume)) {
+            return 0;
+          }
+          if (volume >= HEAVY_VOLUME_THRESHOLD) {
+            return volume * 2.2;
+          }
+          return Math.max(volume, 0.4) * 1.3;
+        });
+        const bubbleText = rawBubbleVolumes.map((volume) => volume.toFixed(2));
+
+        const maxBubble = bubbleSizes.length ? Math.max(...bubbleSizes) : 0;
+        const sizeRef = maxBubble > 0 ? maxBubble / 120 : 1;
+
+        Plotly.react(
+          priceChart,
+          [
+            {
+              type: 'candlestick',
+              name: 'Price',
+              x: candleTimes,
+              open: opens,
+              high: highs,
+              low: lows,
+              close: closes,
+              increasing: {
+                line: { color: '#34d399', width: 2 },
+                fillcolor: 'rgba(52, 211, 153, 0.25)',
+              },
+              decreasing: {
+                line: { color: '#f87171', width: 2 },
+                fillcolor: 'rgba(248, 113, 113, 0.25)',
+              },
+              hovertemplate:
+                '時間: %{x|%H:%M}<br>始値: %{open:.2f}<br>高値: %{high:.2f}<br>安値: %{low:.2f}<br>終値: %{close:.2f}<extra></extra>',
+            },
+            {
+              type: 'bar',
+              name: 'Volume',
+              x: candleTimes,
+              y: volumes,
+              yaxis: 'y2',
+              marker: {
+                color: '#1d4ed8',
+                opacity: 0.65,
+              },
+              hovertemplate: '時間: %{x|%H:%M}<br>出来高: %{y:.2f}<extra></extra>',
+            },
+            {
+              name: 'Trade Volume',
+              mode: 'markers',
+              x: bubbleX,
+              y: bubbleY,
+              text: bubbleText,
+              marker: {
+                color: '#fbbf24',
+                sizemode: 'area',
+                sizeref: sizeRef,
+                sizemin: 6,
+                opacity: 0.85,
+                size: bubbleSizes,
+                line: { color: 'rgba(15, 23, 42, 0.6)', width: 1 },
+              },
+              hovertemplate: '時間: %{x|%H:%M:%S}<br>価格: %{y:.2f}<br>出来高: %{text}<extra></extra>',
+            },
+          ],
+          priceChart.layout
+        );
+      }
+
+      function updateDomSurface(payload) {
+        const orderBook = payload.order_book ?? { bids: [], asks: [] };
+        const bids = [...(orderBook.bids ?? [])];
+        const asks = [...(orderBook.asks ?? [])];
+
+        const reversedBids = bids.reverse();
+        const priceLevels = [
+          ...reversedBids.map((b) => b.price),
+          ...asks.map((a) => a.price),
+        ];
+        const bidsVolumes = [
+          ...reversedBids.map((b) => b.volume),
+          ...new Array(asks.length).fill(null),
+        ];
+        const asksVolumes = [
+          ...new Array(reversedBids.length).fill(null),
+          ...asks.map((a) => a.volume),
+        ];
+
+        const combinedVolumes = [...bidsVolumes, ...asksVolumes].filter((value) => typeof value === 'number');
+        const maxVolume = combinedVolumes.length ? Math.max(...combinedVolumes) : 0;
+        const zmax = Math.max(HEAVY_VOLUME_THRESHOLD, maxVolume || 0);
+
+        const heatmapTrace = {
+          type: 'heatmap',
+          z: [bidsVolumes, asksVolumes],
+          x: priceLevels,
+          y: ['Bids', 'Asks'],
+          colorscale: DOM_VOLUME_COLORSCALE,
+          showscale: true,
+          zmin: 0,
+          zmax,
+          hovertemplate: '価格: %{x}<br>出来高: %{z}<extra></extra>',
+          colorbar: {
+            title: 'Volume',
+            tickcolor: '#e2e8f0',
+            titlefont: { color: '#e2e8f0' },
+            tickfont: { color: '#e2e8f0' },
+          },
+        };
+
+        Plotly.react(
+          domSurface,
+          [heatmapTrace],
+          domSurface.layout
+        );
+
+        const bidItems = reversedBids
+          .map((b) => {
+            const heavyClass = b.volume >= HEAVY_VOLUME_THRESHOLD ? ' class="heavy"' : '';
+            return `<li${heavyClass}><span class="price">${formatPrice(b.price)}</span><span class="volume">${formatVolume(b.volume)}</span></li>`;
+          })
+          .join('');
+        const askItems = asks
+          .map((a) => {
+            const heavyClass = a.volume >= HEAVY_VOLUME_THRESHOLD ? ' class="heavy"' : '';
+            return `<li${heavyClass}><span class="price">${formatPrice(a.price)}</span><span class="volume">${formatVolume(a.volume)}</span></li>`;
+          })
+          .join('');
+
+        depthBidsEl.innerHTML = bidItems || '<li>—</li>';
+        depthAsksEl.innerHTML = askItems || '<li>—</li>';
+      }
+
+      function formatPrice(value) {
+        if (typeof value !== 'number' || Number.isNaN(value)) return '—';
+        return value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 5 });
+      }
+
+      function formatVolume(value) {
+        if (typeof value !== 'number' || Number.isNaN(value)) return '—';
+        return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
+      }
+
+      function updateStatus(payload) {
+        contractEl.textContent = payload.contract_id ?? '—';
+        updatedEl.textContent = payload.last_update ? new Date(payload.last_update).toLocaleTimeString() : '—';
+        updateConnectionState(payload.state ?? 'UNKNOWN');
+
+        const quote = payload.quote ?? {};
+        const lastPrice = quote.last ?? (payload.trades?.at(-1)?.price ?? null);
+        lastPriceEl.textContent = lastPrice != null ? formatPrice(lastPrice) : '—';
+        bidAskEl.textContent = quote.bid != null && quote.ask != null
+          ? `${formatPrice(quote.bid)} / ${formatPrice(quote.ask)}`
+          : '—';
+      }
+
+      function handleSnapshot(payload) {
+        updateStatus(payload);
+        updatePriceChart(payload);
+        updateDomSurface(payload);
+      }
+
+      function connectWebSocket() {
+        const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+        ws = new WebSocket(`${protocol}://${window.location.host}/ws`);
+
+        ws.onopen = () => {
+          retryCount = 0;
+          updateConnectionState('CONNECTED');
+        };
+
+        ws.onmessage = (event) => {
+          const payload = JSON.parse(event.data);
+          handleSnapshot(payload);
+        };
+
+        ws.onclose = () => {
+          updateConnectionState('DISCONNECTED');
+          if (retryCount < 10) {
+            const timeout = Math.min(1000 * Math.pow(2, retryCount), 15000);
+            retryCount += 1;
+            setTimeout(connectWebSocket, timeout);
+          }
+        };
+
+        ws.onerror = () => {
+          updateConnectionState('ERROR');
+          ws.close();
+        };
+      }
+
+      initCharts();
+      connectWebSocket();
+    </script>
+  </body>
+</html>
+

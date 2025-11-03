@@ -314,6 +314,31 @@ scripts/ directory: Contains ready-to-run CLI applications (e.g., fetch_historic
 examples/ directory: Contains focused code snippets demonstrating specific library features (e.g., 01_authenticate_and_get_accounts.py, 12_dedicated_market_data_stream.py).
 All scripts and examples are updated to reflect v0.5.0 changes.
 
+### Real-Time DOM Surface Dashboard Example
+
+The `examples/dom_surface_dashboard/` folder contains a full-stack example that
+streams live market data into an interactive browser dashboard.  It exposes a
+FastAPI application (`app.py`) that:
+
+* authenticates with the TopStep Market Hub using `tsxapipy`,
+* relays quotes, trades, and depth updates via a websocket, and
+* renders a Plotly-powered DOM surface (heatmap), rolling price chart, and
+  volume bubble overlay in `index.html`.
+
+To run the dashboard:
+
+```bash
+pip install ".[dashboard]"  # adds FastAPI & uvicorn for the dashboard example
+uvicorn examples.dom_surface_dashboard.app:app --reload
+```
+
+By default the example subscribes to the contract declared in your `.env`
+(`DEFAULT_CONFIG_CONTRACT_ID`). Override it with
+`TSXAPIPY_DASHBOARD_CONTRACT_ID` if you want to point the dashboard at a
+different instrument. If neither is set the app now falls back to a "demo"
+mode that generates synthetic order-book and trade data so the interface can
+be explored without live credentials.
+
 Development and Testing
 
 Tests: Located in the tests/ directory. Use pytest to run.
