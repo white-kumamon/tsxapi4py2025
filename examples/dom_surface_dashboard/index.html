@@ -173,6 +173,18 @@
         font-size: 0.9rem;
       }
 
+      .depth-list li.volume-20 {
+        color: #f8fafc;
+      }
+
+      .depth-list li.volume-50 {
+        color: #fb923c;
+      }
+
+      .depth-list li.volume-100 {
+        color: #facc15;
+      }
+
       .depth-list li span.price {
         font-variant-numeric: tabular-nums;
       }
@@ -263,6 +275,75 @@
       let ws;
       let retryCount = 0;
 
+      function normalisePrice(value) {
+        const numeric = Number(value);
+        if (!Number.isFinite(numeric)) return null;
+        return Math.round(numeric);
+      }
+
+      function classifyDepthVolume(volume) {
+        const numeric = Number(volume ?? 0);
+        if (!Number.isFinite(numeric)) return null;
+        if (numeric >= 100) return 'volume-100';
+        if (numeric >= 50) return 'volume-50';
+        if (numeric >= 20) return 'volume-20';
+        return null;
+      }
+
+      function depthFillColor(volume) {
+        const numeric = Number(volume ?? 0);
+        if (!Number.isFinite(numeric)) return 'rgba(148, 163, 184, 0.1)';
+        if (numeric >= 100) return 'rgba(250, 204, 21, 0.35)';
+        if (numeric >= 50) return 'rgba(249, 115, 22, 0.3)';
+        if (numeric >= 20) return 'rgba(255, 255, 255, 0.25)';
+        return 'rgba(148, 163, 184, 0.12)';
+      }
+
+      function buildDomShapes(orderBook) {
+        const shapes = [];
+        const bids = orderBook?.bids ?? [];
+        const asks = orderBook?.asks ?? [];
+        const band = 0.45;
+
+        for (const level of bids) {
+          const price = normalisePrice(level?.price);
+          if (price == null) continue;
+          const fillcolor = depthFillColor(level?.volume);
+          shapes.push({
+            type: 'rect',
+            xref: 'paper',
+            yref: 'y',
+            x0: 0,
+            x1: 0.48,
+            y0: price - band,
+            y1: price + band,
+            line: { width: 0 },
+            fillcolor,
+            opacity: 1,
+          });
+        }
+
+        for (const level of asks) {
+          const price = normalisePrice(level?.price);
+          if (price == null) continue;
+          const fillcolor = depthFillColor(level?.volume);
+          shapes.push({
+            type: 'rect',
+            xref: 'paper',
+            yref: 'y',
+            x0: 0.52,
+            x1: 1,
+            y0: price - band,
+            y1: price + band,
+            line: { width: 0 },
+            fillcolor,
+            opacity: 1,
+          });
+        }
+
+        return shapes;
+      }
+
       function initCharts() {
         if (!priceInitialised) {
           const baseLayout = {
@@ -270,7 +351,13 @@
             plot_bgcolor: 'rgba(17,28,52,0.7)',
             margin: { t: 30, l: 50, r: 10, b: 40 },
             xaxis: { title: 'Time', type: 'date', gridcolor: 'rgba(148,163,184,0.15)' },
-            yaxis: { title: 'Price', gridcolor: 'rgba(148,163,184,0.15)' },
+            yaxis: {
+              title: 'Price',
+              gridcolor: 'rgba(148,163,184,0.15)',
+              tickformat: ',.0f',
+              hoverformat: ',.0f',
+              dtick: 1,
+            },
             legend: { orientation: 'h', xanchor: 'center', x: 0.5, y: 1.1 },
           };
 
@@ -316,14 +403,19 @@
                 y: ['Bids', 'Asks'],
                 colorscale: 'Portland',
                 showscale: true,
-                hovertemplate: '価格: %{x}<br>出来高: %{z}<extra></extra>',
+                hovertemplate: '価格: %{x:.0f}<br>出来高: %{z}<extra></extra>',
               },
             ],
             {
               paper_bgcolor: 'rgba(0,0,0,0)',
               plot_bgcolor: 'rgba(17,28,52,0.7)',
               margin: { t: 30, l: 60, r: 10, b: 40 },
-              xaxis: { title: 'Price', gridcolor: 'rgba(148,163,184,0.15)' },
+              xaxis: {
+                title: 'Price',
+                gridcolor: 'rgba(148,163,184,0.15)',
+                tickformat: ',.0f',
+                hoverformat: ',.0f',
+              },
               yaxis: { title: '', gridcolor: 'rgba(148,163,184,0.15)' },
             },
             { responsive: true, displaylogo: false }
@@ -340,14 +432,28 @@
       function updatePriceChart(payload) {
         const trades = payload.trades ?? [];
         const bubbles = payload.volume_bubbles ?? [];
+        const orderBook = payload.order_book ?? { bids: [], asks: [] };
 
         const x = trades.map((t) => new Date(t.timestamp));
-        const y = trades.map((t) => t.price);
+        const y = trades.map((t) => normalisePrice(t.price));
 
         const bubbleX = bubbles.map((t) => new Date(t.timestamp));
-        const bubbleY = bubbles.map((t) => t.price);
-        const bubbleSize = bubbles.map((t) => Math.max(t.volume, 0));
-        const bubbleText = bubbles.map((t) => `Vol: ${t.volume.toFixed(2)}`);
+        const bubbleY = bubbles.map((t) => normalisePrice(t.price));
+        const bubbleSize = bubbles.map((t) => Math.max(Number(t.volume ?? 0), 0));
+        const bubbleText = bubbles.map(
+          (t) => `価格: ${formatPrice(t.price)}<br>出来高: ${formatVolume(t.volume)}`
+        );
+
+        const layout = {
+          ...(priceChart.layout ?? {}),
+          yaxis: {
+            ...(priceChart.layout?.yaxis ?? {}),
+            tickformat: ',.0f',
+            hoverformat: ',.0f',
+            dtick: 1,
+          },
+          shapes: buildDomShapes(orderBook),
+        };
 
         Plotly.react(
           priceChart,
@@ -358,6 +464,7 @@
               line: { color: '#38bdf8', width: 2 },
               x,
               y,
+              hovertemplate: '価格: %{y:.0f}<br>時間: %{x|%H:%M:%S}<extra></extra>',
             },
             {
               name: 'Volume',
@@ -368,35 +475,68 @@
                 sizeref: bubbleSize.length ? Math.max(...bubbleSize) / 120 : 2,
                 sizemin: 4,
                 opacity: 0.7,
+                line: { color: '#0f172a', width: 1 },
                 size: bubbleSize,
               },
               x: bubbleX,
               y: bubbleY,
               text: bubbleText,
+              hovertemplate: '%{text}<extra></extra>',
             },
           ],
-          priceChart.layout
+          layout
         );
       }
 
       function updateDomSurface(payload) {
         const orderBook = payload.order_book ?? { bids: [], asks: [] };
-        const bids = [...(orderBook.bids ?? [])];
-        const asks = [...(orderBook.asks ?? [])];
+        const bids = Array.isArray(orderBook.bids) ? [...orderBook.bids] : [];
+        const asks = Array.isArray(orderBook.asks) ? [...orderBook.asks] : [];
 
-        const reversedBids = bids.reverse();
+        const processedBids = bids
+          .map((b) => {
+            const volume = Number(b.volume ?? 0);
+            return {
+              ...b,
+              price: normalisePrice(b.price),
+              volume: Number.isFinite(volume) ? volume : 0,
+            };
+          })
+          .filter((b) => b.price != null);
+        const processedAsks = asks
+          .map((a) => {
+            const volume = Number(a.volume ?? 0);
+            return {
+              ...a,
+              price: normalisePrice(a.price),
+              volume: Number.isFinite(volume) ? volume : 0,
+            };
+          })
+          .filter((a) => a.price != null);
+
+        const reversedBids = [...processedBids].reverse();
+
         const priceLevels = [
           ...reversedBids.map((b) => b.price),
-          ...asks.map((a) => a.price),
+          ...processedAsks.map((a) => a.price),
         ];
         const bidsVolumes = [
-          ...reversedBids.map((b) => b.volume),
-          ...new Array(asks.length).fill(null),
+          ...reversedBids.map((b) => Math.max(b.volume, 0)),
+          ...new Array(processedAsks.length).fill(null),
         ];
         const asksVolumes = [
           ...new Array(reversedBids.length).fill(null),
-          ...asks.map((a) => a.volume),
+          ...processedAsks.map((a) => Math.max(a.volume, 0)),
         ];
+
+        const domLayout = {
+          ...(domSurface.layout ?? {}),
+          xaxis: {
+            ...(domSurface.layout?.xaxis ?? {}),
+            tickformat: ',.0f',
+            hoverformat: ',.0f',
+          },
+        };
 
         Plotly.react(
           domSurface,
@@ -408,17 +548,25 @@
               y: ['Bids', 'Asks'],
               colorscale: 'Portland',
               showscale: true,
-              hovertemplate: '価格: %{x}<br>出来高: %{z}<extra></extra>',
+              hovertemplate: '価格: %{x:.0f}<br>出来高: %{z}<extra></extra>',
             },
           ],
-          domSurface.layout
+          domLayout
         );
 
         const bidItems = reversedBids
-          .map((b) => `<li><span class="price">${formatPrice(b.price)}</span><span class="volume">${formatVolume(b.volume)}</span></li>`)
+          .map((b) => {
+            const cls = classifyDepthVolume(b.volume);
+            const classAttr = cls ? ` class="${cls}"` : '';
+            return `<li${classAttr}><span class="price">${formatPrice(b.price)}</span><span class="volume">${formatVolume(b.volume)}</span></li>`;
+          })
           .join('');
-        const askItems = asks
-          .map((a) => `<li><span class="price">${formatPrice(a.price)}</span><span class="volume">${formatVolume(a.volume)}</span></li>`)
+        const askItems = processedAsks
+          .map((a) => {
+            const cls = classifyDepthVolume(a.volume);
+            const classAttr = cls ? ` class="${cls}"` : '';
+            return `<li${classAttr}><span class="price">${formatPrice(a.price)}</span><span class="volume">${formatVolume(a.volume)}</span></li>`;
+          })
           .join('');
 
         depthBidsEl.innerHTML = bidItems || '<li>—</li>';
@@ -426,13 +574,15 @@
       }
 
       function formatPrice(value) {
-        if (typeof value !== 'number' || Number.isNaN(value)) return '—';
-        return value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 5 });
+        const normalised = normalisePrice(value);
+        if (normalised == null) return '—';
+        return normalised.toLocaleString(undefined, { maximumFractionDigits: 0 });
       }
 
       function formatVolume(value) {
-        if (typeof value !== 'number' || Number.isNaN(value)) return '—';
-        return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
+        const numeric = Number(value);
+        if (!Number.isFinite(numeric)) return '—';
+        return Math.max(numeric, 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
       }
 
       function updateStatus(payload) {

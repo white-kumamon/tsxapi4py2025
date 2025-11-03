@@ -308,6 +308,9 @@ class DomSurfaceCoordinator:
         with self._lock:
             book = self._order_book
             for entry in updates:
+                if not isinstance(entry, dict):
+                    continue
+
                 price = _to_float(entry.get("price") or entry.get("Price") or entry.get("p"))
                 if price is None:
                     continue
@@ -319,7 +322,7 @@ class DomSurfaceCoordinator:
                     volume = 0.0
                 action = _normalise_depth_action(entry.get("type") or entry.get("Type") or entry.get("t"))
 
-                rounded_price = round(price, 6)
+                rounded_price = round(price)
                 side_book = book[side]
 
                 if action == "delete" or volume <= 0:
