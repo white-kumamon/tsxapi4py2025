@@ -335,9 +335,7 @@ uvicorn examples.dom_surface_dashboard.app:app --reload
 By default the example subscribes to the contract declared in your `.env`
 (`DEFAULT_CONFIG_CONTRACT_ID`). Override it with
 `TSXAPIPY_DASHBOARD_CONTRACT_ID` if you want to point the dashboard at a
-different instrument. If neither is set the app now falls back to a "demo"
-mode that generates synthetic order-book and trade data so the interface can
-be explored without live credentials.
+different instrument.
 
 Development and Testing
 

@@ -32,20 +32,13 @@ async def startup_event() -> None:
     loop = asyncio.get_running_loop()
 
     contract_id = os.getenv("TSXAPIPY_DASHBOARD_CONTRACT_ID", DEFAULT_CONFIG_CONTRACT_ID or "")
-    demo_mode = False
     if not contract_id:
-        contract_id = "CON.DEMO.DASHBOARD"
-        demo_mode = True
-        LOGGER.warning(
-            "No contract configured. Starting DOM Surface dashboard in demo mode with synthetic data."
+        raise RuntimeError(
+            "No contract configured. Set TSXAPIPY_DASHBOARD_CONTRACT_ID or DEFAULT_CONFIG_CONTRACT_ID in your environment/.env."
         )
 
-    LOGGER.info(
-        "Starting DOM Surface coordinator for %s (%s)",
-        contract_id,
-        "demo" if demo_mode else "live",
-    )
-    coordinator = DomSurfaceCoordinator(contract_id=contract_id, loop=loop, demo_mode=demo_mode)
+    LOGGER.info("Starting DOM Surface coordinator for %s", contract_id)
+    coordinator = DomSurfaceCoordinator(contract_id=contract_id, loop=loop)
     coordinator.start()
     _coordinator = coordinator
 

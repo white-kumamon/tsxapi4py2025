@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import random
 import threading
 import time
 from collections import deque
@@ -130,17 +129,11 @@ class DomSurfaceCoordinator:
         *,
         trade_history: int = 500,
         depth_levels: int = 20,
-        demo_mode: bool = False,
-        demo_seed: Optional[int] = None,
     ) -> None:
         self.contract_id = contract_id
         self.loop = loop
         self.trade_history = trade_history
         self.depth_levels = depth_levels
-        self.demo_mode = demo_mode
-
-        self._rng = random.Random(demo_seed)
-        self._demo_thread: Optional[threading.Thread] = None
 
         self._trades: Deque[Dict[str, Any]] = deque(maxlen=trade_history)
         self._volume_trades: Deque[Dict[str, Any]] = deque(maxlen=trade_history)
@@ -167,23 +160,6 @@ class DomSurfaceCoordinator:
     # ------------------------------------------------------------------
     def start(self) -> None:
         """Authenticate and start the underlying :class:`DataStream`."""
-
-        if self.demo_mode:
-            if self._demo_thread and self._demo_thread.is_alive():
-                self.logger.info("Demo generator already running for %s", self.contract_id)
-                return
-
-            self.logger.info("Starting demo mode data generator for %s", self.contract_id)
-            self._last_error = None
-            self._connection_state = "DEMO"
-            self._stop_event.clear()
-
-            self._demo_thread = threading.Thread(target=self._demo_loop, daemon=True)
-            self._demo_thread.start()
-
-            self._heartbeat_thread = threading.Thread(target=self._heartbeat_loop, daemon=True)
-            self._heartbeat_thread.start()
-            return
 
         if self._stream_thread and self._stream_thread.is_alive():
             self.logger.info("Stream already running for %s", self.contract_id)
@@ -246,8 +222,6 @@ class DomSurfaceCoordinator:
 
         if self._stream_thread and self._stream_thread.is_alive():
             self._stream_thread.join(timeout=5)
-        if self._demo_thread and self._demo_thread.is_alive():
-            self._demo_thread.join(timeout=5)
         if self._heartbeat_thread and self._heartbeat_thread.is_alive():
             self._heartbeat_thread.join(timeout=5)
 
@@ -354,56 +328,6 @@ class DomSurfaceCoordinator:
                     side_book[rounded_price] = volume
 
         self._broadcast_snapshot(force=True)
-
-    # ------------------------------------------------------------------
-    # Demo data generator
-    # ------------------------------------------------------------------
-    def _demo_loop(self) -> None:
-        """Generate synthetic snapshots when running without live market data."""
-
-        price = self._rng.uniform(90.0, 110.0)
-        spread = 0.25
-        volume_threshold = 5.0
-
-        while not self._stop_event.is_set():
-            price = max(0.01, price + self._rng.gauss(0, 0.35))
-            last_price = round(price, 2)
-            bid_price = round(last_price - spread, 2)
-            ask_price = round(last_price + spread, 2)
-
-            trade_volume = max(0.1, self._rng.lognormvariate(1.2, 0.45))
-            trade_side = "bid" if self._rng.random() > 0.5 else "ask"
-            timestamp = datetime.now(timezone.utc)
-
-            with self._lock:
-                trade_entry = {
-                    "timestamp": timestamp,
-                    "price": last_price,
-                    "volume": round(trade_volume, 2),
-                    "side": trade_side,
-                }
-                self._quote = {"bid": bid_price, "ask": ask_price, "last": last_price}
-                self._trades.append(trade_entry)
-                if trade_entry["volume"] >= volume_threshold:
-                    self._volume_trades.append(trade_entry)
-
-                bid_levels: Dict[float, float] = {}
-                ask_levels: Dict[float, float] = {}
-                for level in range(1, self.depth_levels + 1):
-                    level_variance = self._rng.uniform(0.5, 3.0)
-                    bid_levels[round(bid_price - level * spread, 2)] = round(
-                        max(0.1, self._rng.lognormvariate(1.0, 0.55) * level_variance), 2
-                    )
-                    ask_levels[round(ask_price + level * spread, 2)] = round(
-                        max(0.1, self._rng.lognormvariate(1.0, 0.55) * level_variance), 2
-                    )
-
-                self._order_book = {"bid": bid_levels, "ask": ask_levels}
-                self._connection_state = "DEMO"
-                self._last_error = None
-
-            self._broadcast_snapshot(force=True)
-            time.sleep(0.75)
 
     # ------------------------------------------------------------------
     # Snapshot + broadcast helpers
