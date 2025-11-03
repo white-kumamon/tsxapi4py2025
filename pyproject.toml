@@ -75,6 +75,10 @@ dev = [
     "pydantic>=2.4.0,<3.0.0",
     "pydantic_core>=2.0.0,<3.0.0"
 ]
+dashboard = [
+    "fastapi>=0.110.0,<0.112.0",
+    "uvicorn[standard]>=0.23.0,<0.28.0",
+]
 #docs = [
 #    "sphinx>=4.0.0,<8.0.0",
 #    "sphinx-rtd-theme>=1.0.0,<2.0.0",
