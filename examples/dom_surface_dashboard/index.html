@@ -278,7 +278,18 @@
       function normalisePrice(value) {
         const numeric = Number(value);
         if (!Number.isFinite(numeric)) return null;
-        return Math.round(numeric);
+        const step = 0.25;
+        const quantized = Math.round(numeric / step) * step;
+        return Math.round(quantized * 100) / 100;
+      }
+
+      function domMarkerSize(volume) {
+        const numeric = Number(volume ?? 0);
+        if (!Number.isFinite(numeric) || numeric <= 0) return 0;
+        if (numeric >= 100) return 18;
+        if (numeric >= 50) return 14;
+        if (numeric >= 20) return 10;
+        return Math.max(Math.sqrt(numeric) * 2, 6);
       }
 
       function classifyDepthVolume(volume) {
@@ -303,7 +314,7 @@
         const shapes = [];
         const bids = orderBook?.bids ?? [];
         const asks = orderBook?.asks ?? [];
-        const band = 0.45;
+        const band = 0.13;
 
         for (const level of bids) {
           const price = normalisePrice(level?.price);
@@ -354,9 +365,9 @@
             yaxis: {
               title: 'Price',
               gridcolor: 'rgba(148,163,184,0.15)',
-              tickformat: ',.0f',
-              hoverformat: ',.0f',
-              dtick: 1,
+              tickformat: ',.2f',
+              hoverformat: ',.2f',
+              dtick: 0.25,
             },
             legend: { orientation: 'h', xanchor: 'center', x: 0.5, y: 1.1 },
           };
@@ -370,6 +381,7 @@
                 line: { color: '#38bdf8', width: 2 },
                 x: [],
                 y: [],
+                hovertemplate: '価格: %{y:.2f}<br>時間: %{x|%H:%M:%S}<extra></extra>',
               },
               {
                 name: 'Volume',
@@ -384,6 +396,35 @@
                 x: [],
                 y: [],
                 text: [],
+                hovertemplate: '%{text}<extra></extra>',
+              },
+              {
+                name: 'DOM Bid Depth',
+                mode: 'markers',
+                marker: {
+                  symbol: 'triangle-up',
+                  color: [],
+                  size: [],
+                  line: { color: 'rgba(34,197,94,0.8)', width: 1 },
+                },
+                x: [],
+                y: [],
+                text: [],
+                hovertemplate: '%{text}<extra></extra>',
+              },
+              {
+                name: 'DOM Ask Depth',
+                mode: 'markers',
+                marker: {
+                  symbol: 'triangle-down',
+                  color: [],
+                  size: [],
+                  line: { color: 'rgba(248,113,113,0.8)', width: 1 },
+                },
+                x: [],
+                y: [],
+                text: [],
+                hovertemplate: '%{text}<extra></extra>',
               },
             ],
             baseLayout,
@@ -403,7 +444,7 @@
                 y: ['Bids', 'Asks'],
                 colorscale: 'Portland',
                 showscale: true,
-                hovertemplate: '価格: %{x:.0f}<br>出来高: %{z}<extra></extra>',
+                hovertemplate: '価格: %{x:.2f}<br>出来高: %{z}<extra></extra>',
               },
             ],
             {
@@ -413,8 +454,8 @@
               xaxis: {
                 title: 'Price',
                 gridcolor: 'rgba(148,163,184,0.15)',
-                tickformat: ',.0f',
-                hoverformat: ',.0f',
+                tickformat: ',.2f',
+                hoverformat: ',.2f',
               },
               yaxis: { title: '', gridcolor: 'rgba(148,163,184,0.15)' },
             },
@@ -433,6 +474,7 @@
         const trades = payload.trades ?? [];
         const bubbles = payload.volume_bubbles ?? [];
         const orderBook = payload.order_book ?? { bids: [], asks: [] };
+        const depthEvents = Array.isArray(payload.depth_events) ? payload.depth_events : [];
 
         const x = trades.map((t) => new Date(t.timestamp));
         const y = trades.map((t) => normalisePrice(t.price));
@@ -444,13 +486,43 @@
           (t) => `価格: ${formatPrice(t.price)}<br>出来高: ${formatVolume(t.volume)}`
         );
 
+        const processedDepthEvents = depthEvents
+          .map((event) => {
+            const timestamp = event?.timestamp ? new Date(event.timestamp) : null;
+            const price = normalisePrice(event?.price);
+            if (!timestamp || price == null) return null;
+            const rawSide = (event?.side ?? '').toString().toLowerCase();
+            const side = rawSide.includes('ask') || rawSide.includes('sell') ? 'ask' : 'bid';
+            const currentVolume = Number(
+              event?.current_volume ?? event?.currentVolume ?? event?.volume ?? 0
+            );
+            if (!Number.isFinite(currentVolume) || currentVolume <= 0) return null;
+            const volumeChange = Number(event?.volume ?? 0);
+            const color = depthFillColor(currentVolume);
+            const size = domMarkerSize(currentVolume);
+            if (size <= 0) return null;
+            return {
+              timestamp,
+              price,
+              side,
+              currentVolume,
+              volumeChange,
+              color,
+              size,
+            };
+          })
+          .filter(Boolean);
+
+        const domBids = processedDepthEvents.filter((event) => event.side === 'bid');
+        const domAsks = processedDepthEvents.filter((event) => event.side === 'ask');
+
         const layout = {
           ...(priceChart.layout ?? {}),
           yaxis: {
             ...(priceChart.layout?.yaxis ?? {}),
-            tickformat: ',.0f',
-            hoverformat: ',.0f',
-            dtick: 1,
+            tickformat: ',.2f',
+            hoverformat: ',.2f',
+            dtick: 0.25,
           },
           shapes: buildDomShapes(orderBook),
         };
@@ -464,7 +536,7 @@
               line: { color: '#38bdf8', width: 2 },
               x,
               y,
-              hovertemplate: '価格: %{y:.0f}<br>時間: %{x|%H:%M:%S}<extra></extra>',
+              hovertemplate: '価格: %{y:.2f}<br>時間: %{x|%H:%M:%S}<extra></extra>',
             },
             {
               name: 'Volume',
@@ -481,6 +553,44 @@
               x: bubbleX,
               y: bubbleY,
               text: bubbleText,
+              hovertemplate: '%{text}<extra></extra>',
+            },
+            {
+              name: 'DOM Bid Depth',
+              mode: 'markers',
+              marker: {
+                symbol: 'triangle-up',
+                color: domBids.map((event) => event.color),
+                size: domBids.map((event) => event.size),
+                line: { color: 'rgba(34,197,94,0.8)', width: 1 },
+                opacity: 0.95,
+              },
+              x: domBids.map((event) => event.timestamp),
+              y: domBids.map((event) => event.price),
+              text: domBids.map(
+                (event) =>
+                  `価格: ${formatPrice(event.price)}<br>板数量: ${formatVolume(event.currentVolume)}<br>` +
+                  `更新量: ${formatVolume(event.volumeChange)}`
+              ),
+              hovertemplate: '%{text}<extra></extra>',
+            },
+            {
+              name: 'DOM Ask Depth',
+              mode: 'markers',
+              marker: {
+                symbol: 'triangle-down',
+                color: domAsks.map((event) => event.color),
+                size: domAsks.map((event) => event.size),
+                line: { color: 'rgba(248,113,113,0.8)', width: 1 },
+                opacity: 0.95,
+              },
+              x: domAsks.map((event) => event.timestamp),
+              y: domAsks.map((event) => event.price),
+              text: domAsks.map(
+                (event) =>
+                  `価格: ${formatPrice(event.price)}<br>板数量: ${formatVolume(event.currentVolume)}<br>` +
+                  `更新量: ${formatVolume(event.volumeChange)}`
+              ),
               hovertemplate: '%{text}<extra></extra>',
             },
           ],
@@ -533,8 +643,8 @@
           ...(domSurface.layout ?? {}),
           xaxis: {
             ...(domSurface.layout?.xaxis ?? {}),
-            tickformat: ',.0f',
-            hoverformat: ',.0f',
+            tickformat: ',.2f',
+            hoverformat: ',.2f',
           },
         };
 
@@ -548,7 +658,7 @@
               y: ['Bids', 'Asks'],
               colorscale: 'Portland',
               showscale: true,
-              hovertemplate: '価格: %{x:.0f}<br>出来高: %{z}<extra></extra>',
+              hovertemplate: '価格: %{x:.2f}<br>出来高: %{z}<extra></extra>',
             },
           ],
           domLayout
@@ -576,7 +686,10 @@
       function formatPrice(value) {
         const normalised = normalisePrice(value);
         if (normalised == null) return '—';
-        return normalised.toLocaleString(undefined, { maximumFractionDigits: 0 });
+        return normalised.toLocaleString(undefined, {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        });
       }
 
       function formatVolume(value) {

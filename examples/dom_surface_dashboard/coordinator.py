@@ -31,6 +31,9 @@ from tsxapipy import (
 )
 
 
+PRICE_INCREMENT = 0.25
+
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -80,7 +83,22 @@ def _to_float(value: Any) -> Optional[float]:
         return float(value)
     except (TypeError, ValueError):
         LOGGER.debug("Unable to convert %s (%s) to float", value, type(value))
+    return None
+
+
+def _quantize_price(value: Optional[float]) -> Optional[float]:
+    """Snap price values to the configured price increment."""
+
+    if value is None:
         return None
+
+    try:
+        scaled = round(value / PRICE_INCREMENT)
+    except TypeError:
+        return None
+
+    quantized = scaled * PRICE_INCREMENT
+    return round(quantized, 6)
 
 
 def _normalise_side(value: Any) -> Optional[str]:
@@ -138,6 +156,7 @@ class DomSurfaceCoordinator:
         self._trades: Deque[Dict[str, Any]] = deque(maxlen=trade_history)
         self._volume_trades: Deque[Dict[str, Any]] = deque(maxlen=trade_history)
         self._order_book: Dict[str, Dict[float, float]] = {"bid": {}, "ask": {}}
+        self._depth_events: Deque[Dict[str, Any]] = deque(maxlen=1000)
         self._quote: Dict[str, float] = {}
 
         self._subscribers: Set[asyncio.Queue] = set()
@@ -278,7 +297,7 @@ class DomSurfaceCoordinator:
             _ensure_datetime(trade.get("timestamp") or trade.get("Timestamp") or trade.get("ts") or trade.get("time"))
             or datetime.now(timezone.utc)
         )
-        price = _to_float(trade.get("price") or trade.get("Price") or trade.get("p"))
+        price = _quantize_price(_to_float(trade.get("price") or trade.get("Price") or trade.get("p")))
         volume = _to_float(trade.get("volume") or trade.get("Volume") or trade.get("v") or trade.get("qty"))
         side = _normalise_side(trade.get("side") or trade.get("Side") or trade.get("s"))
 
@@ -311,24 +330,66 @@ class DomSurfaceCoordinator:
                 if not isinstance(entry, dict):
                     continue
 
-                price = _to_float(entry.get("price") or entry.get("Price") or entry.get("p"))
+                price = _quantize_price(
+                    _to_float(entry.get("price") or entry.get("Price") or entry.get("p"))
+                )
                 if price is None:
                     continue
-                side = _normalise_side(entry.get("side") or entry.get("Side") or entry.get("s"))
+                side_source = (
+                    entry.get("side")
+                    or entry.get("Side")
+                    or entry.get("s")
+                    or entry.get("type")
+                    or entry.get("Type")
+                    or entry.get("t")
+                )
+                side = _normalise_side(side_source)
                 if side not in {"bid", "ask"}:
                     continue
-                volume = _to_float(entry.get("volume") or entry.get("Volume") or entry.get("v") or entry.get("qty"))
-                if volume is None:
-                    volume = 0.0
-                action = _normalise_depth_action(entry.get("type") or entry.get("Type") or entry.get("t"))
+                current_volume = _to_float(
+                    entry.get("currentVolume")
+                    or entry.get("CurrentVolume")
+                    or entry.get("current_volume")
+                    or entry.get("cv")
+                )
+                volume_delta = _to_float(
+                    entry.get("volume") or entry.get("Volume") or entry.get("v") or entry.get("qty")
+                )
+                book_volume = current_volume if current_volume is not None else volume_delta
+                action_source = (
+                    entry.get("action")
+                    or entry.get("Action")
+                    or entry.get("op")
+                    or entry.get("operation")
+                    or entry.get("changeType")
+                    or entry.get("UpdateType")
+                    or entry.get("updateType")
+                )
+                action = _normalise_depth_action(action_source)
 
                 price_key = round(price, 6)
                 side_book = book[side]
 
-                if action == "delete" or volume <= 0:
+                if action == "delete" or (book_volume is not None and book_volume <= 0):
                     side_book.pop(price_key, None)
                 else:
-                    side_book[price_key] = volume
+                    side_book[price_key] = book_volume if book_volume is not None else 0.0
+
+                timestamp = _ensure_datetime(
+                    entry.get("timestamp")
+                    or entry.get("Timestamp")
+                    or entry.get("ts")
+                    or entry.get("time")
+                ) or datetime.now(timezone.utc)
+
+                event_payload = {
+                    "timestamp": timestamp,
+                    "price": price,
+                    "volume": max(volume_delta or 0.0, 0.0),
+                    "current_volume": max(book_volume or 0.0, 0.0),
+                    "side": side,
+                }
+                self._depth_events.append(event_payload)
 
         self._broadcast_snapshot(force=True)
 
@@ -383,6 +444,16 @@ class DomSurfaceCoordinator:
 
         bids_payload = self._aggregate_order_book_side(self._order_book["bid"], descending=True)
         asks_payload = self._aggregate_order_book_side(self._order_book["ask"], descending=False)
+        depth_events_payload = [
+            {
+                "timestamp": event["timestamp"].isoformat(),
+                "price": event["price"],
+                "volume": event["volume"],
+                "current_volume": event["current_volume"],
+                "side": event["side"],
+            }
+            for event in list(self._depth_events)
+        ]
 
         snapshot = {
             "contract_id": self.contract_id,
@@ -396,6 +467,7 @@ class DomSurfaceCoordinator:
                 "bids": bids_payload,
                 "asks": asks_payload,
             },
+            "depth_events": depth_events_payload,
         }
 
         return snapshot
@@ -415,14 +487,14 @@ class DomSurfaceCoordinator:
         for raw_price, volume in side_book.items():
             if volume is None or volume <= 0:
                 continue
-            price_bucket = int(round(raw_price))
-            buckets[price_bucket] = buckets.get(price_bucket, 0.0) + float(volume)
+            bucket_key = int(round(raw_price / PRICE_INCREMENT))
+            buckets[bucket_key] = buckets.get(bucket_key, 0.0) + float(volume)
 
         ordered = sorted(buckets.items(), key=lambda kv: kv[0], reverse=descending)
         payload: List[Dict[str, Any]] = []
-        for idx, (price, total_volume) in enumerate(ordered[: self.depth_levels]):
+        for idx, (bucket_key, total_volume) in enumerate(ordered[: self.depth_levels]):
             payload.append({
-                "price": price,
+                "price": round(bucket_key * PRICE_INCREMENT, 6),
                 "volume": total_volume,
                 "level": idx + 1,
             })
