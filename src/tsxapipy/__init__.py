@@ -16,6 +16,13 @@ from .api.client import APIClient, MAX_BARS_PER_REQUEST
 from .api.contract_utils import get_futures_contract_details
 from .real_time import DataStream, UserHubStream, StreamConnectionState
 from .pipeline import LiveCandleAggregator, DataManager
+from .monitor import (
+    ContractMonitor,
+    ContractUniverseManager,
+    ContractSummary,
+    MonitorResult,
+    TimeframeDefinition,
+)
 from .trading import ( # <--- IMPORT FROM .trading
     OrderPlacer,
     ORDER_STATUS_TO_STRING_MAP,
@@ -58,7 +65,12 @@ __all__ = [
     'StreamConnectionState',
     'LiveCandleAggregator',
     'DataManager',
-    'OrderPlacer', 
+    'ContractMonitor',
+    'ContractUniverseManager',
+    'ContractSummary',
+    'MonitorResult',
+    'TimeframeDefinition',
+    'OrderPlacer',
     'api_schemas', 
     'UTC_TZ', 
     'DEFAULT_CONFIG_CONTRACT_ID',
