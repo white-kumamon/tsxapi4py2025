@@ -89,11 +89,7 @@ class ContractUniverseManager:
 
         aggregated: Dict[str, ContractSummary] = {}
         for prefix in self._search_prefixes:
-            try:
-                contracts = self._api_client.search_contracts(search_text=prefix, live=True)
-            except APIError as exc:
-                logger.warning("Contract search failed for prefix '%s': %s", prefix, exc)
-                continue
+            contracts = self._fetch_contracts_with_fallback(prefix)
 
             for contract in contracts:
                 if not contract.id:
@@ -106,6 +102,32 @@ class ContractUniverseManager:
         self._last_loaded_at = datetime.now(UTC_TZ)
         self._write_to_disk()
         logger.info("Contract universe refreshed: %d contracts stored.", len(self._cached_contracts))
+
+    def _fetch_contracts_with_fallback(self, prefix: str) -> Sequence[schemas.Contract]:
+        """Return contracts for a search prefix, falling back to non-live results."""
+
+        try:
+            contracts = self._api_client.search_contracts(search_text=prefix, live=True)
+        except APIError as exc:
+            logger.warning("Contract search failed for prefix '%s': %s", prefix, exc)
+            return []
+
+        if contracts:
+            return contracts
+
+        logger.debug(
+            "No live contracts found for prefix '%s'. Retrying without live filter.",
+            prefix,
+        )
+        try:
+            return self._api_client.search_contracts(search_text=prefix, live=False)
+        except APIError as exc:
+            logger.warning(
+                "Contract search failed for prefix '%s' (non-live retry): %s",
+                prefix,
+                exc,
+            )
+            return []
 
     # ------------------------------------------------------------------
     # Filtering helpers
